@@ -172,38 +172,41 @@ func setValue(entries []*ldap.Entry, q *query) {
 	}
 }
 
+// parse value for replication and handle multiple values for contextCSN attribute
 func setReplicationValue(entries []*ldap.Entry, q *query) {
 	for _, entry := range entries {
-		val := entry.GetAttributeValue(q.searchAttr)
-		if val == "" {
-			// not every entry will have this attribute
-			continue
+		attributeValues := entry.GetAttributeValues(q.searchAttr) // with multiple node on replications, attribute can have multiple value
+		for _, context := range attributeValues {
+			if context == "" {
+				// not every entry will have this attribute
+				continue
+			}
+			fields := log.Fields{
+				"filter": q.searchFilter,
+				"attr":   q.searchAttr,
+				"value":  context,
+			}
+			valueBuffer := strings.Split(context, "#")
+			gt, err := time.Parse("20060102150405.999999Z", valueBuffer[0])
+			if err != nil {
+				log.WithFields(fields).WithError(err).Warn("unexpected gt value")
+				continue
+			}
+			count, err := strconv.ParseFloat(valueBuffer[1], 64)
+			if err != nil {
+				log.WithFields(fields).WithError(err).Warn("unexpected count value")
+				continue
+			}
+			sid := valueBuffer[2]
+			mod, err := strconv.ParseFloat(valueBuffer[3], 64)
+			if err != nil {
+				log.WithFields(fields).WithError(err).Warn("unexpected mod value")
+				continue
+			}
+			q.metric.WithLabelValues(sid, "gt").Set(float64(gt.Unix()))
+			q.metric.WithLabelValues(sid, "count").Set(count)
+			q.metric.WithLabelValues(sid, "mod").Set(mod)
 		}
-		fields := log.Fields{
-			"filter": q.searchFilter,
-			"attr":   q.searchAttr,
-			"value":  val,
-		}
-		valueBuffer := strings.Split(val, "#")
-		gt, err := time.Parse("20060102150405.999999Z", valueBuffer[0])
-		if err != nil {
-			log.WithFields(fields).WithError(err).Warn("unexpected gt value")
-			continue
-		}
-		count, err := strconv.ParseFloat(valueBuffer[1], 64)
-		if err != nil {
-			log.WithFields(fields).WithError(err).Warn("unexpected count value")
-			continue
-		}
-		sid := valueBuffer[2]
-		mod, err := strconv.ParseFloat(valueBuffer[3], 64)
-		if err != nil {
-			log.WithFields(fields).WithError(err).Warn("unexpected mod value")
-			continue
-		}
-		q.metric.WithLabelValues(sid, "gt").Set(float64(gt.Unix()))
-		q.metric.WithLabelValues(sid, "count").Set(count)
-		q.metric.WithLabelValues(sid, "mod").Set(mod)
 	}
 }
 
